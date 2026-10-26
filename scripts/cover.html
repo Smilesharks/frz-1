@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>FRZ-1 cover</title>
+<style>
+  :root {
+    --panel: #e8e7e3;
+    --panel-light: #f4f3ef;
+    --ink: #111111;
+    --ink-soft: #6b6a66;
+    --accent: #ff5a1f;
+    --instance: #9747ff;
+    --font: "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    font-family: var(--font);
+    color: var(--ink);
+    background-color: var(--panel);
+    background-image:
+      linear-gradient(rgba(17, 17, 17, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(17, 17, 17, 0.06) 1px, transparent 1px);
+    background-size: 16px 16px;
+  }
+  .stage {
+    display: grid;
+    grid-template-columns: 520px 640px 1fr;
+    gap: 80px;
+    align-items: center;
+    height: 100%;
+    padding: 0 96px;
+  }
+  .label { font-size: 16px; text-transform: uppercase; color: var(--ink-soft); letter-spacing: 0.08em; }
+  .label b { color: var(--ink); margin-right: 10px; }
+  .title { font-size: 120px; font-weight: 700; letter-spacing: 0.02em; line-height: 1; margin: 24px 0 32px; }
+  .title i { display: inline-block; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); margin-left: 16px; vertical-align: middle; }
+  .lede { font-size: 26px; line-height: 1.45; border-top: 2px solid var(--ink); padding-top: 24px; }
+  .steps { margin-top: 40px; font-size: 18px; line-height: 2; list-style: none; border-top: 1px solid var(--ink); }
+  .steps li { border-bottom: 1px solid rgba(17, 17, 17, 0.25); }
+  .steps b { display: inline-block; width: 48px; }
+  .device {
+    width: 640px;
+    border: 2px solid var(--ink);
+    border-radius: 12px;
+    box-shadow: 0 10px 0 var(--ink);
+    overflow: hidden;
+    background: var(--panel);
+  }
+  .device img { display: block; width: 640px; height: 840px; }
+  .compare { display: flex; flex-direction: column; gap: 28px; }
+  svg text { font-family: var(--font); }
+</style>
+</head>
+<body>
+  <main class="stage">
+    <section>
+      <div class="label"><b>00</b>figma plugin</div>
+      <div class="title">FRZ-1<i></i></div>
+      <p class="lede">Freeze a frame at its current state. Same layers, fully editable, no links back to your components.</p>
+      <ul class="steps">
+        <li><b>01</b>Select a frame</li>
+        <li><b>02</b>Press freeze</li>
+        <li><b>03</b>Keep the copy as a stage of the process</li>
+      </ul>
+    </section>
+
+    <div class="device"><img src="../docs/ui-ready.png" alt="" /></div>
+
+    <section class="compare">
+      <div class="label"><b>A</b>before: linked instances</div>
+      <svg width="440" height="300" viewBox="0 0 440 300">
+        <rect x="1" y="1" width="438" height="298" fill="#f4f3ef" stroke="#111" stroke-width="2" />
+        <text x="16" y="28" font-size="16" fill="#111"># Home</text>
+        <g fill="none" stroke="#9747ff" stroke-width="2.5">
+          <rect x="16" y="44" width="408" height="240" />
+          <rect x="36" y="88" width="368" height="180" />
+          <rect x="56" y="132" width="160" height="120" />
+          <rect x="228" y="132" width="160" height="120" />
+        </g>
+        <g font-size="14" fill="#9747ff">
+          <text x="28" y="70">&#9671; Section</text>
+          <text x="48" y="114">&#9671; Card grid</text>
+          <text x="68" y="158">&#9671; Card</text>
+          <text x="240" y="158">&#9671; Card</text>
+        </g>
+      </svg>
+
+      <svg width="440" height="40" viewBox="0 0 440 40">
+        <line x1="20" y1="20" x2="400" y2="20" stroke="#111" stroke-width="2" />
+        <path d="M400 10 L420 20 L400 30 Z" fill="#111" />
+        <circle cx="210" cy="20" r="12" fill="#ff5a1f" />
+      </svg>
+
+      <div class="label"><b>B</b>after: plain editable frames</div>
+      <svg width="440" height="300" viewBox="0 0 440 300">
+        <rect x="1" y="1" width="438" height="298" fill="#f4f3ef" stroke="#111" stroke-width="2" />
+        <text x="16" y="28" font-size="16" fill="#111"># Home / frozen 2026-10-27 14:32</text>
+        <g fill="none" stroke="#6b6a66" stroke-width="2">
+          <rect x="16" y="44" width="408" height="240" />
+          <rect x="36" y="88" width="368" height="180" />
+          <rect x="56" y="132" width="160" height="120" />
+          <rect x="228" y="132" width="160" height="120" />
+        </g>
+        <g font-size="14" fill="#6b6a66">
+          <text x="28" y="70"># Section</text>
+          <text x="48" y="114"># Card grid</text>
+          <text x="68" y="158"># Card</text>
+          <text x="240" y="158"># Card</text>
+        </g>
+      </svg>
+    </section>
+  </main>
+</body>
+</html>

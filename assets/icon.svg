@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <pattern id="grid" width="8" height="8" patternUnits="userSpaceOnUse">
+      <path d="M8 0H0V8" fill="none" stroke="#111" stroke-opacity="0.08" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <!-- Panel -->
+  <rect x="0" y="0" width="128" height="128" rx="24" fill="#e8e7e3"/>
+  <rect x="0" y="0" width="128" height="128" rx="24" fill="url(#grid)"/>
+  <!-- Key -->
+  <rect x="22" y="26" width="84" height="84" rx="12" fill="#111"/>
+  <rect x="22" y="22" width="84" height="84" rx="12" fill="#f4f3ef" stroke="#111" stroke-width="3"/>
+  <!-- Frame crop marks -->
+  <g fill="none" stroke="#111" stroke-width="4" stroke-linecap="square">
+    <path d="M40 50V40H50"/>
+    <path d="M78 40H88V50"/>
+    <path d="M88 78V88H78"/>
+    <path d="M50 88H40V78"/>
+  </g>
+  <!-- Frozen point -->
+  <circle cx="64" cy="64" r="11" fill="#ff5a1f"/>
+</svg>

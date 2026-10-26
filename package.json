@@ -1,0 +1,19 @@
+{
+  "name": "frz-1",
+  "version": "0.1.0",
+  "scripts": {
+    "build": "tsc --noEmit && esbuild src/code.ts --bundle --target=es2017 --outfile=dist/code.js",
+    "watch": "esbuild src/code.ts --bundle --target=es2017 --outfile=dist/code.js --watch",
+    "typecheck": "tsc --noEmit",
+    "render": "node scripts/render.mjs"
+  },
+  "license": "MIT",
+  "description": "Freeze a Figma frame: duplicate it and detach every nested component instance, so you keep an editable snapshot of each design stage.",
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.142.0",
+    "esbuild": "^0.28.2",
+    "playwright": "1.57",
+    "typescript": "^7.0.2"
+  },
+  "private": true
+}

@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  :root {
+    --panel: #e8e7e3;
+    --panel-light: #f4f3ef;
+    --ink: #111111;
+    --ink-soft: #6b6a66;
+    --rule: #111111;
+    --grid: rgba(17, 17, 17, 0.06);
+    --accent: #ff5a1f;
+    --lcd: #121212;
+    --lcd-ink: #f1efe8;
+    --lcd-dim: #5c5b57;
+    --font: "SF Mono", ui-monospace, Menlo, "JetBrains Mono", Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { height: 100%; }
+
+  body {
+    font: 10px/1.4 var(--font);
+    color: var(--ink);
+    background-color: var(--panel);
+    /* The visible 8px grid behind every panel */
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 8px 8px;
+    letter-spacing: 0.02em;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+
+  .unit {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 8px;
+    gap: 6px;
+  }
+
+  /* Header strip */
+  .top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 4px;
+  }
+  .model { font-size: 13px; font-weight: 700; letter-spacing: 0.06em; }
+  .meta { display: flex; align-items: center; gap: 6px; color: var(--ink-soft); text-transform: uppercase; }
+  .led {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #c9c7c0; border: 1px solid var(--ink);
+  }
+  .led.on { background: var(--accent); }
+  .led.busy { background: var(--accent); animation: blink 0.6s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0.2; } }
+
+  /* Numbered section labels */
+  .label {
+    display: flex;
+    gap: 6px;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 3px;
+  }
+  .label b { color: var(--ink); font-weight: 700; }
+
+  .selection-name {
+    border: 1px solid var(--rule);
+    background: var(--panel-light);
+    padding: 5px 6px;
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .selection-name.empty { color: var(--ink-soft); }
+
+  /* LCD readout */
+  .lcd {
+    background: var(--lcd);
+    color: var(--lcd-ink);
+    border-radius: 4px;
+    padding: 6px 10px 5px;
+    box-shadow: inset 0 0 0 1px #000, inset 0 2px 6px rgba(0, 0, 0, 0.6);
+  }
+  .lcd-cells { display: grid; grid-template-columns: 1.6fr 1fr 1fr; }
+  .lcd-cell + .lcd-cell { border-left: 1px solid #2a2a2a; padding-left: 10px; }
+  .lcd-key { font-size: 8px; color: var(--lcd-dim); text-transform: uppercase; letter-spacing: 0.12em; }
+  .lcd-value {
+    font-size: 22px;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+  }
+  .lcd-value.ghost { color: #2c2c2a; }
+  .lcd-status {
+    margin-top: 5px;
+    padding-top: 3px;
+    border-top: 1px solid #2a2a2a;
+    font-size: 9px;
+    text-transform: uppercase;
+    color: var(--accent);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* 16 segment progress bar inside the LCD */
+  .segments { display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; margin-top: 5px; }
+  .segments i { height: 4px; background: #262624; }
+  .segments i.lit { background: var(--lcd-ink); }
+
+  /* Keys that feel like hardware buttons */
+  .key {
+    font: inherit;
+    color: var(--ink);
+    background: var(--panel-light);
+    border: 1px solid var(--ink);
+    border-radius: 4px;
+    box-shadow: 0 3px 0 var(--ink);
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    transition: transform 40ms, box-shadow 40ms;
+  }
+  .key:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
+  .key:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .key:disabled { cursor: default; color: var(--ink-soft); border-color: var(--ink-soft); box-shadow: 0 3px 0 var(--ink-soft); }
+
+  .toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    text-align: left;
+  }
+  .toggle .led { flex: none; }
+  .toggle .hint {
+    margin-left: auto;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--ink-soft);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 150px;
+  }
+
+  .freeze {
+    width: 100%;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px;
+    font-size: 12px;
+    font-weight: 700;
+    background: var(--accent);
+  }
+  .freeze:disabled { background: var(--panel-light); }
+
+  /* Report */
+  .report { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .rows { border-top: 1px solid var(--rule); overflow: auto; flex: 1; }
+  .row {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 2px 0;
+    border-bottom: 1px solid rgba(17, 17, 17, 0.2);
+  }
+  .row span:first-child { text-transform: uppercase; color: var(--ink-soft); }
+  .row span:last-child { font-variant-numeric: tabular-nums; text-align: right; }
+  /* Skipped layers: name on one line, reason underneath */
+  .row.skip { flex-direction: column; gap: 0; }
+  .row.skip span:first-child { text-transform: none; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row.skip span:last-child { color: var(--ink-soft); text-align: left; }
+  .placeholder { padding: 4px 0; color: var(--ink-soft); }
+</style>
+</head>
+<body>
+  <main class="unit">
+    <header class="top">
+      <span class="model">FRZ-1</span>
+      <span class="meta">freeze unit <span class="led" id="led"></span></span>
+    </header>
+
+    <section>
+      <div class="label"><b>01</b> selection</div>
+      <div class="selection-name empty" id="selection-name">Nothing selected</div>
+    </section>
+
+    <section class="lcd" aria-live="polite">
+      <div class="lcd-cells">
+        <div class="lcd-cell">
+          <div class="lcd-key">instances</div>
+          <div class="lcd-value" id="lcd-count">----</div>
+        </div>
+        <div class="lcd-cell">
+          <div class="lcd-key">depth</div>
+          <div class="lcd-value" id="lcd-depth">--</div>
+        </div>
+        <div class="lcd-cell">
+          <div class="lcd-key">layers</div>
+          <div class="lcd-value" id="lcd-layers">--</div>
+        </div>
+      </div>
+      <div class="segments" id="segments"></div>
+      <div class="lcd-status" id="lcd-status">Select a frame or instance</div>
+    </section>
+
+    <section>
+      <div class="label"><b>02</b> option</div>
+      <button class="key toggle" id="rename" aria-pressed="true">
+        <span class="led on" id="rename-led"></span>
+        rename copy
+        <span class="hint" id="rename-hint"></span>
+      </button>
+    </section>
+
+    <section>
+      <div class="label"><b>03</b> action</div>
+      <button class="key freeze" id="freeze" disabled>
+        <span id="freeze-label">freeze</span><span>&#9654;</span>
+      </button>
+    </section>
+
+    <section class="report">
+      <div class="label"><b>04</b> report</div>
+      <div class="rows" id="rows">
+        <div class="placeholder">The copy appears to the right of the selection.</div>
+      </div>
+    </section>
+  </main>
+
+<script>
+  const SEGMENT_COUNT = 16
+
+  const elements = {
+    led: document.getElementById('led'),
+    selectionName: document.getElementById('selection-name'),
+    count: document.getElementById('lcd-count'),
+    depth: document.getElementById('lcd-depth'),
+    layers: document.getElementById('lcd-layers'),
+    segments: document.getElementById('segments'),
+    status: document.getElementById('lcd-status'),
+    rename: document.getElementById('rename'),
+    renameLed: document.getElementById('rename-led'),
+    renameHint: document.getElementById('rename-hint'),
+    freeze: document.getElementById('freeze'),
+    freezeLabel: document.getElementById('freeze-label'),
+    rows: document.getElementById('rows'),
+  }
+
+  const state = { rename: true, busy: false, summary: null }
+
+  for (let i = 0; i < SEGMENT_COUNT; i++) elements.segments.appendChild(document.createElement('i'))
+
+  function send(message) {
+    parent.postMessage({ pluginMessage: message }, '*')
+  }
+
+  function pad(value, width) {
+    return String(value).padStart(width, '0')
+  }
+
+  function setSegments(fraction) {
+    const lit = Math.round(Math.min(Math.max(fraction, 0), 1) * SEGMENT_COUNT)
+    Array.from(elements.segments.children).forEach((segment, index) => {
+      segment.classList.toggle('lit', index < lit)
+    })
+  }
+
+  function setLcd(count, depth, layers) {
+    elements.count.textContent = count
+    elements.depth.textContent = depth
+    elements.layers.textContent = layers
+  }
+
+  function today() {
+    const now = new Date()
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1, 2)}-${pad(now.getDate(), 2)}`
+  }
+
+  function renderRename() {
+    elements.rename.setAttribute('aria-pressed', String(state.rename))
+    elements.renameLed.classList.toggle('on', state.rename)
+    elements.renameHint.textContent = state.rename ? `/ frozen ${today()}` : 'keep name'
+  }
+
+  function renderSelection(summary) {
+    state.summary = summary
+    const { names, layerCount, instanceCount, depth } = summary
+
+    if (layerCount === 0) {
+      elements.selectionName.textContent = 'Nothing selected'
+      elements.selectionName.classList.add('empty')
+      setLcd('----', '--', '--')
+      elements.status.textContent = summary.skipped.length ? summary.skipped[0].reason : 'Select a frame or instance'
+    } else {
+      const more = names.length > 1 ? `  +${names.length - 1} more` : ''
+      elements.selectionName.textContent = names[0] + more
+      elements.selectionName.classList.remove('empty')
+      setLcd(pad(instanceCount, 4), pad(depth, 2), pad(layerCount, 2))
+      elements.status.textContent = instanceCount === 0
+        ? 'No instances in selection'
+        : `Ready: ${instanceCount} to detach over ${depth} level${depth === 1 ? '' : 's'}`
+    }
+
+    elements.led.className = 'led' + (instanceCount > 0 ? ' on' : '')
+    elements.freeze.disabled = state.busy || instanceCount === 0
+    setSegments(0)
+  }
+
+  function renderRows(rows) {
+    elements.rows.innerHTML = ''
+    for (const [key, value, className] of rows) {
+      const row = document.createElement('div')
+      row.className = 'row' + (className ? ' ' + className : '')
+      const keyCell = document.createElement('span')
+      const valueCell = document.createElement('span')
+      // textContent, never innerHTML: layer names come from the document.
+      keyCell.textContent = key
+      valueCell.textContent = value
+      row.append(keyCell, valueCell)
+      elements.rows.appendChild(row)
+    }
+  }
+
+  function setBusy(busy) {
+    state.busy = busy
+    elements.freezeLabel.textContent = busy ? 'working' : 'freeze'
+    elements.freeze.disabled = busy || !state.summary || state.summary.instanceCount === 0
+    elements.led.className = 'led' + (busy ? ' busy' : ' on')
+  }
+
+  elements.rename.addEventListener('click', () => {
+    state.rename = !state.rename
+    renderRename()
+  })
+
+  elements.freeze.addEventListener('click', () => {
+    setBusy(true)
+    setSegments(0)
+    elements.status.textContent = 'Duplicating'
+    renderRows([])
+    send({ type: 'freeze', rename: state.rename })
+  })
+
+  window.onmessage = (event) => {
+    const message = event.data && event.data.pluginMessage
+    if (!message) return
+
+    if (message.type === 'selection') renderSelection(message.summary)
+
+    if (message.type === 'progress') {
+      setSegments(message.total ? message.done / message.total : 1)
+      setLcd(pad(message.total - message.done, 4), pad(message.depth, 2), elements.layers.textContent)
+      elements.status.textContent = `Detaching level ${message.depth}: ${message.done} of ${message.total}`
+    }
+
+    if (message.type === 'result') {
+      setBusy(false)
+      setSegments(1)
+      const rows = [
+        ['detached', pad(message.detached, 4)],
+        ['depth reached', pad(message.depth, 2)],
+        ['instances left', pad(message.remaining, 4)],
+        ['skipped', pad(message.skipped.length, 2)],
+      ]
+      // Only worth a row when several layers were frozen at once
+      if (message.copies > 1) rows.splice(3, 0, ['copies made', pad(message.copies, 2)])
+      if (message.flattened > 0) rows.splice(3, 0, ['components flattened', pad(message.flattened, 2)])
+      for (const skipped of message.skipped) rows.push([skipped.name, skipped.reason, 'skip'])
+      renderRows(rows)
+      // The plugin has just selected the copies, so the readout above shows
+      // their instance count. The status line reports the run instead.
+      elements.status.textContent = message.remaining === 0
+        ? `Frozen: ${message.detached} detached, 0 left`
+        : `Done with ${message.remaining} instance${message.remaining === 1 ? '' : 's'} left, see report`
+    }
+
+    if (message.type === 'error') {
+      setBusy(false)
+      elements.status.textContent = message.message
+      renderRows([['error', message.message]])
+    }
+  }
+
+  renderRename()
+  send({ type: 'ready' })
+</script>
+</body>
+</html>
