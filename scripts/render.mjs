@@ -10,12 +10,14 @@ const fileUrl = (relative) => 'file://' + path.join(root, relative)
 // Realistic data, sent to ui.html exactly as the plugin would send it.
 const readySelection = {
   type: 'selection',
-  summary: { names: ['Home / Desktop'], layerCount: 1, instanceCount: 148, depth: 3, skipped: [] },
+  summary: { names: ['Home / Desktop'], layerCount: 1, skipped: [] },
 }
-// After a run the plugin selects the copy, which has no instances left.
+// What the plugin sends back after the COUNT key is pressed.
+const readyCount = { type: 'count', instanceCount: 148, depth: 3 }
+// After a run the plugin selects the copy.
 const frozenSelection = {
   type: 'selection',
-  summary: { names: ['Home / Desktop / frozen 2026-10-27 14:32'], layerCount: 1, instanceCount: 0, depth: 0, skipped: [] },
+  summary: { names: ['Home / Desktop / frozen 2026-10-27 14:32'], layerCount: 1, skipped: [] },
 }
 const result = {
   type: 'result',
@@ -41,8 +43,8 @@ const iconPage = await browser.newPage({ viewport: { width: 128, height: 128 } }
 await iconPage.goto(fileUrl('assets/icon.svg'))
 await iconPage.screenshot({ path: path.join(root, 'assets/icon-128.png'), omitBackground: true })
 
-// UI on its own, at 2x: ready to run, and after a run
-await screenshotUi(browser, [readySelection], 'docs/ui-ready.png')
+// UI on its own, at 2x: counted and ready to run, and after a run
+await screenshotUi(browser, [readySelection, readyCount], 'docs/ui-ready.png')
 await screenshotUi(browser, [frozenSelection, result], 'docs/ui-result.png')
 
 // Cover at 1920 x 1080

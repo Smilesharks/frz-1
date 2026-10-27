@@ -2,7 +2,11 @@
 // component instance inside the copy until none are left.
 
 const GAP = 80
-const BATCH_SIZE = 50
+
+// Progress goes to the UI every 50 instances or every 200 ms, whichever comes
+// first. Each report also pauses briefly so Figma can redraw.
+const PROGRESS_EVERY_COUNT = 50
+const PROGRESS_EVERY_MS = 200
 
 export interface SkippedLayer {
   name: string
@@ -12,16 +16,21 @@ export interface SkippedLayer {
 export interface SelectionSummary {
   names: string[]
   layerCount: number
+  skipped: SkippedLayer[]
+}
+
+export interface InstanceCount {
   instanceCount: number
   depth: number
-  skipped: SkippedLayer[]
 }
 
 export interface FreezeResult {
   copies: SceneNode[]
+  total: number
   detached: number
   depth: number
   remaining: number
+  flattened: number
   skipped: SkippedLayer[]
 }
 
@@ -61,18 +70,39 @@ export function partitionSelection(selection: readonly SceneNode[]) {
   return { accepted, skipped }
 }
 
-export function summarizeSelection(selection: readonly SceneNode[]): SelectionSummary {
+/** Names only. Runs on every selection change, so it must not search the layer tree. */
+export function describeSelection(selection: readonly SceneNode[]): SelectionSummary {
   const { accepted, skipped } = partitionSelection(selection)
-  const instances = accepted.reduce<InstanceNode[]>((all, node) => all.concat(instancesIn(node)), [])
-  const depth = instances.reduce((max, instance) => Math.max(max, instanceNestingLevel(instance)), 0)
+  return { names: accepted.map((node) => node.name), layerCount: accepted.length, skipped }
+}
 
-  return {
-    names: accepted.map((node) => node.name),
-    layerCount: accepted.length,
-    instanceCount: instances.length,
-    depth,
-    skipped,
+/** Counts instances in the selection, nested ones included. Only runs when the COUNT key is pressed. */
+export function countSelection(selection: readonly SceneNode[]): InstanceCount {
+  const { accepted } = partitionSelection(selection)
+  const rootIds = new Set(accepted.map((node) => node.id))
+
+  // Number of instances on the path from the selected layer down to `node`,
+  // `node` included. Cached by id, so layers shared by many instances (a card
+  // grid with hundreds of cards) are only walked once.
+  const levelById = new Map<string, number>()
+  function levelOf(node: BaseNode): number {
+    const cached = levelById.get(node.id)
+    if (cached !== undefined) return cached
+    const own = node.type === 'INSTANCE' ? 1 : 0
+    const level = rootIds.has(node.id) || !node.parent ? own : levelOf(node.parent) + own
+    levelById.set(node.id, level)
+    return level
   }
+
+  let instanceCount = 0
+  let depth = 0
+  for (const root of accepted) {
+    for (const instance of instancesIn(root)) {
+      instanceCount++
+      depth = Math.max(depth, levelOf(instance))
+    }
+  }
+  return { instanceCount, depth }
 }
 
 // ---------------------------------------------------------------------------
@@ -123,11 +153,97 @@ function findFreeOffset(page: PageNode, bounds: Rect): number {
 }
 
 // ---------------------------------------------------------------------------
-// Flattening main components
+// Freezing
 // ---------------------------------------------------------------------------
 
 /**
- * Swaps every main component inside the copies for a plain frame.
+ * Turns the copies into plain layers: flattens main components, then detaches
+ * every instance, outermost first.
+ *
+ * Detaching an instance turns it into a frame, but instances nested inside it
+ * stay linked to their own components. Figma also gives those nested layers
+ * new ids when their parent is detached, so a list made before the detach goes
+ * stale. We therefore work one level at a time: detach a level, then search
+ * only inside the frames that detachInstance() returned for the next level.
+ *
+ * Note for the future: on a 2,000 instance test frame, about half the time is
+ * Figma's own work after each detach, which it does the first time the new
+ * layers are read. That cost is the same however we search, so searching
+ * frame by frame is mainly about keeping Figma and the progress bar
+ * responsive, not about the total time.
+ */
+export async function freezeCopies(roots: SceneNode[], onProgress: ProgressCallback): Promise<FreezeResult> {
+  const copies = roots.slice()
+  const skipped: SkippedLayer[] = []
+
+  // One search per copy finds instances and main components together.
+  const found = copies.map((root) => nodesOfTypes(root, ['INSTANCE', 'COMPONENT', 'COMPONENT_SET']))
+  let instancesPerCopy = found.map((nodes) => nodes.filter((node): node is InstanceNode => node.type === 'INSTANCE'))
+  const allFound = found.reduce<SceneNode[]>((all, nodes) => all.concat(nodes), [])
+
+  // Rare in a design frame, and flattening variants would break the set.
+  for (const componentSet of allFound.filter((node) => node.type === 'COMPONENT_SET')) {
+    skipped.push({ name: componentSet.name, reason: 'component set, copied as a new component set' })
+  }
+
+  const components = allFound.filter(
+    (node): node is ComponentNode => node.type === 'COMPONENT' && node.parent?.type !== 'COMPONENT_SET',
+  )
+  const flattened = flattenComponents(components)
+  if (flattened > 0) {
+    // Flattening replaced layers, so the instance lists above are stale.
+    instancesPerCopy = copies.map(instancesIn)
+  }
+
+  const total = instancesPerCopy.reduce((sum, instances) => sum + instances.length, 0)
+  const report = createProgressReporter(total, onProgress)
+  const rootIndexById = new Map(copies.map((root, index) => [root.id, index]))
+  let detached = 0
+  let depth = 0
+
+  let level = copies.reduce<InstanceNode[]>(
+    (all, root, index) => all.concat(outermostWithin(root, instancesPerCopy[index])),
+    [],
+  )
+
+  while (level.length > 0) {
+    const frames: FrameNode[] = []
+
+    for (const instance of level) {
+      const { id, name } = instance
+      try {
+        const frame = instance.detachInstance()
+        // If a selected layer was itself an instance, keep our reference to it valid.
+        const rootIndex = rootIndexById.get(id)
+        if (rootIndex !== undefined) copies[rootIndex] = frame
+        frames.push(frame)
+        detached++
+      } catch (error) {
+        // Instances inside a failed one stay linked; they show up as "left" in the report.
+        skipped.push({ name, reason: error instanceof Error ? error.message : String(error) })
+      }
+      await report(detached, depth + 1)
+    }
+
+    if (frames.length === 0) break
+    depth++
+
+    // Only the inside of a frame we just detached can hold the next level.
+    const nextLevel: InstanceNode[] = []
+    for (const frame of frames) {
+      for (const instance of outermostWithin(frame, frame.findAllWithCriteria({ types: ['INSTANCE'] }))) {
+        nextLevel.push(instance)
+      }
+      await report(detached, depth + 1)
+    }
+    level = nextLevel
+  }
+
+  return { copies, total, detached, depth, remaining: total - detached, flattened, skipped }
+}
+
+/**
+ * Swaps each main component for a plain frame.
  *
  * The typings say clone() turns nested main components into instances, but
  * testing showed they come out as brand new main components, which would
@@ -135,37 +251,23 @@ function findFreeOffset(page: PageNode, bounds: Rect): number {
  * so we place an instance of it in the same spot, detach that instance, and
  * delete the component.
  */
-export function flattenComponents(roots: SceneNode[]): { flattened: number; skipped: SkippedLayer[] } {
-  const skipped: SkippedLayer[] = []
+function flattenComponents(components: ComponentNode[]): number {
   let flattened = 0
 
-  for (const root of roots) {
-    if (!('findAllWithCriteria' in root)) continue
+  for (const component of components) {
+    const parent = component.parent
+    if (!parent || !('insertChild' in parent)) continue
 
-    // Rare in a design frame, and flattening variants would break the set.
-    for (const componentSet of root.findAllWithCriteria({ types: ['COMPONENT_SET'] })) {
-      skipped.push({ name: componentSet.name, reason: 'component set, copied as a new component set' })
-    }
-
-    const components = root
-      .findAllWithCriteria({ types: ['COMPONENT'] })
-      .filter((component) => component.parent?.type !== 'COMPONENT_SET')
-
-    for (const component of components) {
-      const parent = component.parent
-      if (!parent || !('insertChild' in parent)) continue
-
-      const instance = component.createInstance()
-      parent.insertChild(parent.children.indexOf(component), instance)
-      copyPlacement(component, instance)
-      const frame = instance.detachInstance()
-      frame.name = component.name
-      component.remove()
-      flattened++
-    }
+    const instance = component.createInstance()
+    parent.insertChild(parent.children.indexOf(component), instance)
+    copyPlacement(component, instance)
+    const frame = instance.detachInstance()
+    frame.name = component.name
+    component.remove()
+    flattened++
   }
 
-  return { flattened, skipped }
+  return flattened
 }
 
 /** Copies the properties that place a layer in its parent (the rest comes from the component). */
@@ -179,94 +281,52 @@ function copyPlacement(from: ComponentNode, to: InstanceNode) {
   to.locked = from.locked
 }
 
-// ---------------------------------------------------------------------------
-// Detaching
-// ---------------------------------------------------------------------------
-
 /**
- * Detaches every instance inside `roots`, outermost first.
- *
- * Detaching an instance turns it into a frame, but instances nested inside it
- * stay linked to their own components. So we detach one layer of nesting per
- * round, re-query, and repeat until nothing is left.
+ * Returns an async function that sends progress at most every
+ * PROGRESS_EVERY_COUNT instances or PROGRESS_EVERY_MS, and pauses each time
+ * it does so Figma can redraw.
  */
-export async function detachAll(roots: SceneNode[], onProgress: ProgressCallback): Promise<FreezeResult> {
-  const copies = roots.slice()
-  const failedIds = new Set<string>()
-  const skipped: SkippedLayer[] = []
-  const total = countInstances(copies)
-  let detached = 0
-  let depth = 0
+function createProgressReporter(total: number, onProgress: ProgressCallback) {
+  let lastCount = 0
+  let lastTime = Date.now()
 
-  for (;;) {
-    // Node references go stale after a detach (the detached children get new
-    // ids), so we query the tree fresh at the start of every round.
-    const outermost = copies
-      .reduce<InstanceNode[]>((all, root) => all.concat(instancesIn(root)), [])
-      .filter((instance) => !failedIds.has(instance.id) && !hasInstanceAncestor(instance))
-
-    if (outermost.length === 0) break
-
-    let detachedThisRound = 0
-    for (let start = 0; start < outermost.length; start += BATCH_SIZE) {
-      for (const instance of outermost.slice(start, start + BATCH_SIZE)) {
-        const { id, name } = instance
-        try {
-          const frame = instance.detachInstance()
-          // If a selected layer was itself an instance, keep our reference to it valid.
-          const rootIndex = copies.findIndex((root) => root.id === id)
-          if (rootIndex !== -1) copies[rootIndex] = frame
-          detached++
-          detachedThisRound++
-        } catch (error) {
-          failedIds.add(id)
-          skipped.push({ name, reason: error instanceof Error ? error.message : String(error) })
-        }
-      }
-      onProgress(detached, total, depth + 1)
-      await yieldToFigma()
-    }
-
-    if (detachedThisRound === 0) break
-    depth++
+  return async (done: number, depth: number) => {
+    const now = Date.now()
+    if (done - lastCount < PROGRESS_EVERY_COUNT && now - lastTime < PROGRESS_EVERY_MS) return
+    lastCount = done
+    lastTime = now
+    onProgress(done, total, depth)
+    await yieldToFigma()
   }
-
-  return { copies, detached, depth, remaining: countInstances(copies), skipped }
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** The node itself if it is an instance, plus every instance inside it at any depth. */
-function instancesIn(node: SceneNode): InstanceNode[] {
-  const found: InstanceNode[] = node.type === 'INSTANCE' ? [node] : []
+/** The node itself if it matches `types`, plus every matching node inside it at any depth. */
+function nodesOfTypes(node: SceneNode, types: NodeType[]): SceneNode[] {
+  const found: SceneNode[] = types.indexOf(node.type) !== -1 ? [node] : []
   // findAllWithCriteria searches the whole subtree, including inside instances,
   // and is much faster than findAll with a callback.
-  if ('findAllWithCriteria' in node) {
-    return found.concat(node.findAllWithCriteria({ types: ['INSTANCE'] }))
-  }
+  if ('findAllWithCriteria' in node) return found.concat(node.findAllWithCriteria({ types }))
   return found
 }
 
-function countInstances(nodes: SceneNode[]): number {
-  return nodes.reduce((sum, node) => sum + instancesIn(node).length, 0)
+function instancesIn(node: SceneNode): InstanceNode[] {
+  return nodesOfTypes(node, ['INSTANCE']) as InstanceNode[]
 }
 
-function hasInstanceAncestor(node: SceneNode): boolean {
-  for (let parent = node.parent; parent && parent.type !== 'PAGE'; parent = parent.parent) {
-    if (parent.type === 'INSTANCE') return true
-  }
-  return false
-}
-
-/** 1 for a top level instance, 2 for an instance inside an instance, and so on. */
-function instanceNestingLevel(instance: InstanceNode): number {
-  let level = 1
-  for (let parent = instance.parent; parent && parent.type !== 'PAGE'; parent = parent.parent) {
-    if (parent.type === 'INSTANCE') level++
-  }
-  return level
+/** The instances in `instances` that have no other instance between them and `container`. */
+function outermostWithin(container: SceneNode, instances: InstanceNode[]): InstanceNode[] {
+  if (container.type === 'INSTANCE') return [container]
+  return instances.filter((instance) => {
+    // Stops at the first instance above, so nested ones cost a step or two.
+    for (let parent = instance.parent; parent && parent.id !== container.id; parent = parent.parent) {
+      if (parent.type === 'INSTANCE') return false
+    }
+    return true
+  })
 }
 
 function hasSelectedAncestor(node: SceneNode, selectedIds: Set<string>): boolean {

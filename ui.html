@@ -154,6 +154,18 @@
     max-width: 150px;
   }
 
+  .actions { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; }
+
+  .count {
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
   .freeze {
     width: 100%;
     height: 38px;
@@ -202,7 +214,7 @@
       <div class="lcd-cells">
         <div class="lcd-cell">
           <div class="lcd-key">instances</div>
-          <div class="lcd-value" id="lcd-count">----</div>
+          <div class="lcd-value" id="lcd-count">--</div>
         </div>
         <div class="lcd-cell">
           <div class="lcd-key">depth</div>
@@ -228,9 +240,14 @@
 
     <section>
       <div class="label"><b>03</b> action</div>
-      <button class="key freeze" id="freeze" disabled>
-        <span id="freeze-label">freeze</span><span>&#9654;</span>
-      </button>
+      <div class="actions">
+        <button class="key count" id="count" disabled>
+          <span>count</span><span>#</span>
+        </button>
+        <button class="key freeze" id="freeze" disabled>
+          <span id="freeze-label">freeze</span><span>&#9654;</span>
+        </button>
+      </div>
     </section>
 
     <section class="report">
@@ -255,12 +272,14 @@
     rename: document.getElementById('rename'),
     renameLed: document.getElementById('rename-led'),
     renameHint: document.getElementById('rename-hint'),
+    countKey: document.getElementById('count'),
     freeze: document.getElementById('freeze'),
     freezeLabel: document.getElementById('freeze-label'),
     rows: document.getElementById('rows'),
   }
 
-  const state = { rename: true, busy: false, summary: null }
+  // counted stays null until the COUNT key is pressed for this selection
+  const state = { rename: true, busy: false, summary: null, counted: null }
 
   for (let i = 0; i < SEGMENT_COUNT; i++) elements.segments.appendChild(document.createElement('i'))
 
@@ -296,28 +315,48 @@
     elements.renameHint.textContent = state.rename ? `/ frozen ${today()}` : 'keep name'
   }
 
+  function hasLayers() {
+    return Boolean(state.summary && state.summary.layerCount > 0)
+  }
+
+  // Freeze needs a selection, and is pointless once COUNT has shown zero.
+  function updateKeys() {
+    const countedEmpty = state.counted !== null && state.counted.instanceCount === 0
+    elements.countKey.disabled = state.busy || !hasLayers()
+    elements.freeze.disabled = state.busy || !hasLayers() || countedEmpty
+  }
+
   function renderSelection(summary) {
     state.summary = summary
-    const { names, layerCount, instanceCount, depth } = summary
+    state.counted = null
+    const { names, layerCount } = summary
 
     if (layerCount === 0) {
       elements.selectionName.textContent = 'Nothing selected'
       elements.selectionName.classList.add('empty')
-      setLcd('----', '--', '--')
+      setLcd('--', '--', '--')
       elements.status.textContent = summary.skipped.length ? summary.skipped[0].reason : 'Select a frame or instance'
     } else {
       const more = names.length > 1 ? `  +${names.length - 1} more` : ''
       elements.selectionName.textContent = names[0] + more
       elements.selectionName.classList.remove('empty')
-      setLcd(pad(instanceCount, 4), pad(depth, 2), pad(layerCount, 2))
-      elements.status.textContent = instanceCount === 0
-        ? 'No instances in selection'
-        : `Ready: ${instanceCount} to detach over ${depth} level${depth === 1 ? '' : 's'}`
+      setLcd('--', '--', pad(layerCount, 2))
+      elements.status.textContent = 'Press count to scan, or freeze'
     }
 
-    elements.led.className = 'led' + (instanceCount > 0 ? ' on' : '')
-    elements.freeze.disabled = state.busy || instanceCount === 0
+    elements.led.className = 'led' + (layerCount > 0 ? ' on' : '')
     setSegments(0)
+    updateKeys()
+  }
+
+  function renderCount(counted) {
+    state.counted = counted
+    const { instanceCount, depth } = counted
+    setLcd(pad(instanceCount, 4), pad(depth, 2), elements.layers.textContent)
+    elements.status.textContent = instanceCount === 0
+      ? 'No instances in selection'
+      : `Ready: ${instanceCount} to detach over ${depth} level${depth === 1 ? '' : 's'}`
+    updateKeys()
   }
 
   function renderRows(rows) {
@@ -338,13 +377,18 @@
   function setBusy(busy) {
     state.busy = busy
     elements.freezeLabel.textContent = busy ? 'working' : 'freeze'
-    elements.freeze.disabled = busy || !state.summary || state.summary.instanceCount === 0
+    updateKeys()
     elements.led.className = 'led' + (busy ? ' busy' : ' on')
   }
 
   elements.rename.addEventListener('click', () => {
     state.rename = !state.rename
     renderRename()
+  })
+
+  elements.countKey.addEventListener('click', () => {
+    elements.status.textContent = 'Counting'
+    send({ type: 'count' })
   })
 
   elements.freeze.addEventListener('click', () => {
@@ -360,6 +404,8 @@
     if (!message) return
 
     if (message.type === 'selection') renderSelection(message.summary)
+
+    if (message.type === 'count') renderCount(message)
 
     if (message.type === 'progress') {
       setSegments(message.total ? message.done / message.total : 1)
