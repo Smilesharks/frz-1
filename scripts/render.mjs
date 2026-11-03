@@ -25,12 +25,17 @@ const result = {
   depth: 3,
   remaining: 0,
   copies: 1,
+  hiddenRemoved: 12,
   skipped: [{ name: 'Logo', reason: 'main component, not an instance' }],
 }
 
-async function screenshotUi(browser, messages, outputPath) {
-  const page = await browser.newPage({ viewport: { width: 320, height: 420 }, deviceScaleFactor: 2 })
+// clicks: ids of keys to press first, such as an option toggle
+async function screenshotUi(browser, messages, outputPath, clicks = []) {
+  const page = await browser.newPage({ viewport: { width: 320, height: 472 }, deviceScaleFactor: 2 })
+  // The rename hint shows today's date; pin it to match the mock copy name.
+  await page.clock.setFixedTime(new Date('2026-10-27T14:32:00'))
   await page.goto(fileUrl('ui.html'))
+  for (const id of clicks) await page.click('#' + id)
   await page.evaluate((list) => list.forEach((message) => window.postMessage({ pluginMessage: message }, '*')), messages)
   await page.waitForTimeout(100)
   await page.screenshot({ path: path.join(root, outputPath) })
@@ -45,7 +50,7 @@ await iconPage.screenshot({ path: path.join(root, 'assets/icon-128.png'), omitBa
 
 // UI on its own, at 2x: counted and ready to run, and after a run
 await screenshotUi(browser, [readySelection, readyCount], 'docs/ui-ready.png')
-await screenshotUi(browser, [frozenSelection, result], 'docs/ui-result.png')
+await screenshotUi(browser, [frozenSelection, result], 'docs/ui-result.png', ['remove-hidden'])
 
 // Cover at 1920 x 1080
 const coverPage = await browser.newPage({ viewport: { width: 1920, height: 1080 } })

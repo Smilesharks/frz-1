@@ -43,7 +43,7 @@ The plugin now appears under **Plugins > Development > FRZ-1**. Run `npm run bui
 
 The original is never changed. One **Undo** (Cmd+Z) removes the whole freeze.
 
-![The plugin window after a run: 148 instances detached over 3 levels, 0 left](docs/ui-result.png)
+![The plugin window after a run with Remove hidden on: 148 instances detached over 3 levels, 0 left, 12 hidden layers removed](docs/ui-result.png)
 
 ## How nested instances are handled
 

@@ -7,7 +7,7 @@ import { cloneBeside, countSelection, describeSelection, freezeCopies, partition
 // traversal must not skip it.
 figma.skipInvisibleInstanceChildren = false
 
-figma.showUI(__html__, { width: 320, height: 420, themeColors: false })
+figma.showUI(__html__, { width: 320, height: 472, themeColors: false })
 
 let busy = false
 
