@@ -282,6 +282,39 @@ function copyPlacement(from: ComponentNode, to: InstanceNode) {
 }
 
 /**
+ * Deletes every hidden layer inside the copies. Runs after detaching, because
+ * Figma does not allow removing a layer inside a linked instance. Only the
+ * outermost hidden layer of a branch is removed (its children go with it), and
+ * the copies themselves are kept even when hidden.
+ */
+export function removeHiddenLayers(roots: SceneNode[]): { removed: number; skipped: SkippedLayer[] } {
+  let removed = 0
+  const skipped: SkippedLayer[] = []
+
+  function visit(node: SceneNode) {
+    // Layers inside an instance that failed to detach cannot be removed; that
+    // instance already shows up as "left" in the report.
+    if (node.type === 'INSTANCE' || !('children' in node)) return
+    for (const child of node.children.slice()) {
+      if (child.visible) {
+        visit(child)
+        continue
+      }
+      const { name } = child
+      try {
+        child.remove()
+        removed++
+      } catch (error) {
+        skipped.push({ name, reason: error instanceof Error ? error.message : String(error) })
+      }
+    }
+  }
+
+  roots.forEach(visit)
+  return { removed, skipped }
+}
+
+/**
  * Returns an async function that sends progress at most every
  * PROGRESS_EVERY_COUNT instances or PROGRESS_EVERY_MS, and pauses each time
  * it does so Figma can redraw.

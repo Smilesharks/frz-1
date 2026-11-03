@@ -1,6 +1,6 @@
 // Plugin entry point. Runs in Figma's sandbox and talks to ui.html via messages.
 
-import { cloneBeside, countSelection, describeSelection, freezeCopies, partitionSelection } from './freeze'
+import { cloneBeside, countSelection, describeSelection, freezeCopies, partitionSelection, removeHiddenLayers } from './freeze'
 
 // This is already false in Figma (true only in Dev Mode), but we set it
 // explicitly: a hidden nested instance is still a link to a component, so the
@@ -21,15 +21,15 @@ figma.on('selectionchange', () => {
   if (!busy) postSelection()
 })
 
-figma.ui.onmessage = async (message: { type: string; rename?: boolean }) => {
+figma.ui.onmessage = async (message: { type: string; rename?: boolean; removeHidden?: boolean }) => {
   if (message.type === 'ready') postSelection()
   if (message.type === 'count' && !busy) {
     figma.ui.postMessage({ type: 'count', ...countSelection(figma.currentPage.selection) })
   }
-  if (message.type === 'freeze' && !busy) await freeze(Boolean(message.rename))
+  if (message.type === 'freeze' && !busy) await freeze(Boolean(message.rename), Boolean(message.removeHidden))
 }
 
-async function freeze(rename: boolean) {
+async function freeze(rename: boolean, removeHidden: boolean) {
   const { accepted, skipped } = partitionSelection(figma.currentPage.selection)
   if (accepted.length === 0) {
     figma.ui.postMessage({ type: 'error', message: 'Nothing to freeze. Select a frame or an instance.' })
@@ -53,6 +53,8 @@ async function freeze(rename: boolean) {
       return
     }
 
+    const hidden = removeHidden ? removeHiddenLayers(result.copies) : { removed: 0, skipped: [] }
+
     // Until commitUndo() is called, everything the plugin has changed counts as
     // one undo step. Committing here closes this freeze as its own step, so a
     // second run in the same session can be undone separately.
@@ -70,7 +72,8 @@ async function freeze(rename: boolean) {
       remaining: result.remaining,
       copies: result.copies.length,
       flattened: result.flattened,
-      skipped: skipped.concat(result.skipped),
+      hiddenRemoved: hidden.removed,
+      skipped: skipped.concat(result.skipped, hidden.skipped),
     })
   } catch (error) {
     busy = false
