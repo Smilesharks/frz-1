@@ -10,7 +10,9 @@ When you iterate on components, every change spreads to every design that uses t
 
 FRZ-1 records those stages. Select a frame, press **Freeze**, and the plugin places a frozen copy next to it. The copy has the same layers and looks identical, but every instance in it is now a plain frame. Collect the frozen copies on a page of their own and you get a record of the whole design process.
 
-The plugin runs entirely inside Figma. It has no network access, no analytics and no runtime dependencies.
+The plugin runs entirely inside Figma. It has no network access and no analytics. Its one runtime dependency is [clipper-lib](https://www.npmjs.com/package/clipper-lib) (Boost Software License), which print mode uses for shape geometry and which is bundled into `dist/code.js`.
+
+FRZ-1 also has a second mode, **Print**, which turns a t-shirt design into one layer per ink colour for screen printing. See [Prepare for print](#prepare-for-print).
 
 ## Install locally
 
@@ -33,6 +35,8 @@ The plugin now appears under **Plugins > Development > FRZ-1**. Run `npm run bui
 
 ## Use it
 
+Freeze is the mode the window opens in (the **Freeze** key under the header is lit).
+
 1. Select one or more frames, or an instance. The window shows the selection name straight away. The instance readout shows `--` until you ask for a count.
 2. Optional: press **Count** to see how many instances the selection contains, counting nested ones, and how deep the nesting goes. On a large frame this can take a second or two, which is why it only runs when you ask.
 3. Leave **Rename copy** on to add `/ frozen YYYY-MM-DD HH:MM` to the copy's name, or press it to keep the original name.
@@ -44,6 +48,66 @@ The plugin now appears under **Plugins > Development > FRZ-1**. Run `npm run bui
 The original is never changed. One **Undo** (Cmd+Z) removes the whole freeze.
 
 ![The plugin window after a run with Remove hidden on: 148 instances detached over 3 levels, 0 left, 12 hidden layers removed](docs/ui-result.png)
+
+## Prepare for print
+
+Print mode takes a t-shirt design and rebuilds a copy of it as clean, separated colour layers: one group per ink colour, with the shirt colour removed. Export that copy as SVG, open it in Adobe Illustrator and assign a Pantone colour to each layer.
+
+Designs are often built to *look* right rather than to separate cleanly. A shape in the shirt colour drawn on top of an orange shape looks like bare fabric, but the orange is still there underneath, so deleting the shirt-colour shapes would bring it back. Print mode works out what is actually visible instead.
+
+### Steps
+
+1. Press **Print** under the header.
+2. Select exactly one frame (or an instance of one).
+3. Press **Scan**. The options section lists every solid fill and stroke colour in the frame, with how many shapes use it. Two kinds of warning can appear under the list:
+   - colours that look almost the same (a CIEDE2000 difference under 5), which are probably meant to be one ink. They are not merged; fix them in the design if they should be.
+   - layers that cannot print as a single solid ink (see below).
+4. Press the colour that is the shirt colour. Its light comes on.
+5. Press **Prepare**. The plugin places a copy to the right of the selection, named `{name} / print YYYY-MM-DD HH:MM`, and rebuilds it.
+
+The original is never changed. One **Undo** (Cmd+Z) removes the whole run. If anything fails part way, the half-built copy is removed again.
+
+### What the copy contains
+
+The copy keeps the size of the original frame, with its background removed. Inside it there is one group per ink, named by its hex value (for example `#F24806`), holding a single compound path. The ink used by the most shapes is the top layer. Inks never overlap, so the order does not change how the design looks.
+
+To get there, the plugin:
+
+1. Detaches every instance in the copy and deletes hidden layers, the same as freeze with **Remove hidden** on.
+2. Reads every visible shape in paint order and converts it to a filled outline. Strokes and text are outlined, clipping frames clip their contents, and masks cut the layers above them.
+3. Works down from the top: each shape keeps only the area that nothing above it covers, whether that is the shirt colour or another ink.
+4. Drops the shirt colour and merges what is left of each ink into one path.
+
+Placed on a background of the shirt colour, the result looks the same as the original.
+
+### What gets flagged
+
+These cannot be printed as one solid ink, so the plugin leaves them out of the copy and lists each one in the report, with its layer name and the reason, instead of guessing:
+
+- gradients, images, videos, patterns and shaders
+- effects such as shadows and blurs
+- blend modes other than normal
+- opacity below 100%, on a layer or on a fill
+- text whose characters use different fills
+
+Two more cases are listed in the report but handled differently:
+
+- A luminance mask, or an alpha mask that is not solid, is not applied. The layers it would clip are printed unclipped.
+- A clipping frame with rounded corners is clipped as a plain rectangle.
+
+### The report
+
+After a run the report shows the colours found, near-identical pairs, shapes processed, strokes and text layers outlined, clipping frames and masks applied, the inks written, how many shirt-colour shapes were removed, everything skipped, and the time taken.
+
+### Performance
+
+The geometry is done with clipper-lib rather than Figma's own boolean operations, which were about 50 times slower on dense pixel art. The covered area is tracked in 64 px tiles, so each new shape is only compared with what is near it. On a reference design with about 62,000 layers and 56,000 painted shapes, a prototype of this approach took about 45 seconds for a full run. The progress bar shows each stage: copying, reading, knockout and writing inks.
+
+### Export to Illustrator
+
+1. Select the print copy and export it as SVG (**Export** in the right panel).
+2. Open the SVG in Adobe Illustrator. Each ink is its own group.
+3. Assign a Pantone colour to each group.
 
 ## How nested instances are handled
 
@@ -82,8 +146,9 @@ Running `npm run render` again will overwrite your screenshots, so only run it i
 
 ```text
 manifest.json      Figma plugin manifest (no network access, dynamic page loading)
-src/code.ts        Plugin entry: talks to the UI and runs a freeze
+src/code.ts        Plugin entry: talks to the UI, runs a freeze or a print run
 src/freeze.ts      Duplicating, placing and detaching
+src/print/         Print mode: colour scan, paint list, geometry, knockout and output
 ui.html            Plugin window: plain HTML, CSS and JavaScript
 assets/            Icon as SVG and 128 x 128 PNG
 docs/              README images

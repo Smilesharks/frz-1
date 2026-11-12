@@ -111,9 +111,10 @@ export function countSelection(selection: readonly SceneNode[]): InstanceCount {
 
 /**
  * Clones each node and places the copies to the right of the selection,
- * keeping their positions relative to each other.
+ * keeping their positions relative to each other. With `rename` on, each copy
+ * is named `{name} / {label} {timestamp}`.
  */
-export function cloneBeside(nodes: SceneNode[], rename: boolean): SceneNode[] {
+export function cloneBeside(nodes: SceneNode[], rename: boolean, label = 'frozen'): SceneNode[] {
   const page = figma.currentPage
   const bounds = unionRect(nodes.map(rectOf))
   const offsetX = findFreeOffset(page, bounds)
@@ -133,7 +134,7 @@ export function cloneBeside(nodes: SceneNode[], rename: boolean): SceneNode[] {
       [c, d, ty],
     ]
 
-    if (rename) copy.name = `${node.name} / frozen ${stamp}`
+    if (rename) copy.name = `${node.name} / ${label} ${stamp}`
     return copy
   })
 }
@@ -319,7 +320,7 @@ export function removeHiddenLayers(roots: SceneNode[]): { removed: number; skipp
  * PROGRESS_EVERY_COUNT instances or PROGRESS_EVERY_MS, and pauses each time
  * it does so Figma can redraw.
  */
-function createProgressReporter(total: number, onProgress: ProgressCallback) {
+export function createProgressReporter(total: number, onProgress: ProgressCallback) {
   let lastCount = 0
   let lastTime = Date.now()
 
@@ -390,7 +391,7 @@ function intersects(a: Rect, b: Rect): boolean {
 }
 
 /** Gives Figma a moment to redraw and handle input between batches. */
-function yieldToFigma(): Promise<void> {
+export function yieldToFigma(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
 

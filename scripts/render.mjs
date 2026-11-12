@@ -31,7 +31,7 @@ const result = {
 
 // clicks: ids of keys to press first, such as an option toggle
 async function screenshotUi(browser, messages, outputPath, clicks = []) {
-  const page = await browser.newPage({ viewport: { width: 320, height: 472 }, deviceScaleFactor: 2 })
+  const page = await browser.newPage({ viewport: { width: 320, height: 560 }, deviceScaleFactor: 2 })
   // The rename hint shows today's date; pin it to match the mock copy name.
   await page.clock.setFixedTime(new Date('2026-10-27T14:32:00'))
   await page.goto(fileUrl('ui.html'))

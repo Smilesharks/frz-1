@@ -11,9 +11,13 @@
   "description": "Freeze a Figma frame: duplicate it and detach every nested component instance, so you keep an editable snapshot of each design stage.",
   "devDependencies": {
     "@figma/plugin-typings": "^1.142.0",
+    "@types/clipper-lib": "^6.4.0",
     "esbuild": "^0.28.2",
     "playwright": "1.57",
     "typescript": "^7.0.2"
   },
-  "private": true
+  "private": true,
+  "dependencies": {
+    "clipper-lib": "^6.4.2"
+  }
 }

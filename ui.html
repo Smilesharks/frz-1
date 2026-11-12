@@ -197,14 +197,37 @@
   .row.skip span:first-child { text-transform: none; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .row.skip span:last-child { color: var(--ink-soft); text-align: left; }
   .placeholder { padding: 4px 0; color: var(--ink-soft); }
+
+  /* FREEZE / PRINT switch */
+  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .modes .toggle + .toggle { margin-top: 0; }
+
+  /* Print mode: one key per color, five fit before the list scrolls */
+  .colors { max-height: 158px; overflow: auto; padding-bottom: 3px; }
+  .colors .toggle + .toggle { margin-top: 6px; }
+  .swatch { flex: none; width: 12px; height: 12px; border: 1px solid var(--ink); }
+  .warn { padding: 3px 0 0; color: var(--ink); text-transform: none; }
+  .warn::before { content: "! "; color: var(--accent); font-weight: 700; }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
   <main class="unit">
     <header class="top">
       <span class="model">FRZ-1</span>
-      <span class="meta">freeze unit <span class="led" id="led"></span></span>
+      <span class="meta"><span id="unit-name">freeze unit</span> <span class="led" id="led"></span></span>
     </header>
+
+    <section class="modes" aria-label="Mode">
+      <button class="key toggle" id="mode-freeze" aria-pressed="true">
+        <span class="led on" id="mode-freeze-led"></span>
+        freeze
+      </button>
+      <button class="key toggle" id="mode-print" aria-pressed="false">
+        <span class="led" id="mode-print-led"></span>
+        print
+      </button>
+    </section>
 
     <section>
       <div class="label"><b>01</b> selection</div>
@@ -214,15 +237,15 @@
     <section class="lcd" aria-live="polite">
       <div class="lcd-cells">
         <div class="lcd-cell">
-          <div class="lcd-key">instances</div>
+          <div class="lcd-key" id="lcd-key-1">instances</div>
           <div class="lcd-value" id="lcd-count">--</div>
         </div>
         <div class="lcd-cell">
-          <div class="lcd-key">depth</div>
+          <div class="lcd-key" id="lcd-key-2">depth</div>
           <div class="lcd-value" id="lcd-depth">--</div>
         </div>
         <div class="lcd-cell">
-          <div class="lcd-key">layers</div>
+          <div class="lcd-key" id="lcd-key-3">layers</div>
           <div class="lcd-value" id="lcd-layers">--</div>
         </div>
       </div>
@@ -232,23 +255,31 @@
 
     <section>
       <div class="label"><b>02</b> options</div>
-      <button class="key toggle" id="rename" aria-pressed="true">
-        <span class="led on" id="rename-led"></span>
-        rename copy
-        <span class="hint" id="rename-hint"></span>
-      </button>
-      <button class="key toggle" id="remove-hidden" aria-pressed="false">
-        <span class="led" id="remove-hidden-led"></span>
-        remove hidden
-        <span class="hint" id="remove-hidden-hint"></span>
-      </button>
+      <div id="freeze-options">
+        <button class="key toggle" id="rename" aria-pressed="true">
+          <span class="led on" id="rename-led"></span>
+          rename copy
+          <span class="hint" id="rename-hint"></span>
+        </button>
+        <button class="key toggle" id="remove-hidden" aria-pressed="false">
+          <span class="led" id="remove-hidden-led"></span>
+          remove hidden
+          <span class="hint" id="remove-hidden-hint"></span>
+        </button>
+      </div>
+      <div id="print-options" hidden>
+        <div class="colors" id="colors">
+          <div class="placeholder">Press scan to list the colors.</div>
+        </div>
+        <div id="warnings"></div>
+      </div>
     </section>
 
     <section>
       <div class="label"><b>03</b> action</div>
       <div class="actions">
         <button class="key count" id="count" disabled>
-          <span>count</span><span>#</span>
+          <span id="count-label">count</span><span>#</span>
         </button>
         <button class="key freeze" id="freeze" disabled>
           <span id="freeze-label">freeze</span><span>&#9654;</span>
@@ -285,10 +316,28 @@
     freeze: document.getElementById('freeze'),
     freezeLabel: document.getElementById('freeze-label'),
     rows: document.getElementById('rows'),
+    unitName: document.getElementById('unit-name'),
+    modeFreeze: document.getElementById('mode-freeze'),
+    modeFreezeLed: document.getElementById('mode-freeze-led'),
+    modePrint: document.getElementById('mode-print'),
+    modePrintLed: document.getElementById('mode-print-led'),
+    lcdKeys: [1, 2, 3].map((index) => document.getElementById('lcd-key-' + index)),
+    freezeOptions: document.getElementById('freeze-options'),
+    printOptions: document.getElementById('print-options'),
+    colors: document.getElementById('colors'),
+    warnings: document.getElementById('warnings'),
+    countLabel: document.getElementById('count-label'),
   }
+
+  // Status line names for print mode progress stages
+  const STAGE_NAMES = { scan: 'Scanning', copy: 'Copying', read: 'Reading', knockout: 'Knockout', write: 'Writing inks' }
+  // How much of the progress bar each print stage fills; detaching shares the copy stage.
+  const STAGE_SPAN = { copy: [0, 0.1], read: [0.1, 0.35], knockout: [0.35, 0.95], write: [0.95, 1] }
 
   // counted stays null until the COUNT key is pressed for this selection
   const state = { rename: true, removeHidden: false, busy: false, summary: null, counted: null }
+  // Print mode: scanned stays null until SCAN has listed the current selection's colors
+  Object.assign(state, { mode: 'freeze', scanned: null, shirt: null })
 
   for (let i = 0; i < SEGMENT_COUNT; i++) elements.segments.appendChild(document.createElement('i'))
 
@@ -335,15 +384,28 @@
   }
 
   // Freeze needs a selection, and is pointless once COUNT has shown zero.
+  // Prepare needs a scan of the current selection and a chosen shirt color.
   function updateKeys() {
     const countedEmpty = state.counted !== null && state.counted.instanceCount === 0
     elements.countKey.disabled = state.busy || !hasLayers()
-    elements.freeze.disabled = state.busy || !hasLayers() || countedEmpty
+    elements.freeze.disabled = state.mode === 'print'
+      ? state.busy || !state.scanned || !state.shirt
+      : state.busy || !hasLayers() || countedEmpty
+    elements.modeFreeze.disabled = state.busy
+    elements.modePrint.disabled = state.busy
+  }
+
+  function actionLabel() {
+    if (state.busy) return 'working'
+    return state.mode === 'print' ? 'prepare' : 'freeze'
   }
 
   function renderSelection(summary) {
     state.summary = summary
     state.counted = null
+    state.scanned = null
+    state.shirt = null
+    renderColors()
     const { names, layerCount } = summary
 
     if (layerCount === 0) {
@@ -355,8 +417,13 @@
       const more = names.length > 1 ? `  +${names.length - 1} more` : ''
       elements.selectionName.textContent = names[0] + more
       elements.selectionName.classList.remove('empty')
-      setLcd('--', '--', pad(layerCount, 2))
-      elements.status.textContent = 'Press count to scan, or freeze'
+      if (state.mode === 'print') {
+        setLcd('--', '--', '--')
+        elements.status.textContent = 'Press scan to list the colors'
+      } else {
+        setLcd('--', '--', pad(layerCount, 2))
+        elements.status.textContent = 'Press count to scan, or freeze'
+      }
     }
 
     elements.led.className = 'led' + (layerCount > 0 ? ' on' : '')
@@ -391,10 +458,144 @@
 
   function setBusy(busy) {
     state.busy = busy
-    elements.freezeLabel.textContent = busy ? 'working' : 'freeze'
+    elements.freezeLabel.textContent = actionLabel()
     updateKeys()
     elements.led.className = 'led' + (busy ? ' busy' : ' on')
   }
+
+  function renderMode() {
+    const print = state.mode === 'print'
+    for (const [key, led, on] of [[elements.modeFreeze, elements.modeFreezeLed, !print], [elements.modePrint, elements.modePrintLed, print]]) {
+      key.setAttribute('aria-pressed', String(on))
+      led.classList.toggle('on', on)
+    }
+    elements.unitName.textContent = print ? 'print unit' : 'freeze unit'
+    const labels = print ? ['colors', 'flags', 'shapes'] : ['instances', 'depth', 'layers']
+    elements.lcdKeys.forEach((key, index) => { key.textContent = labels[index] })
+    elements.freezeOptions.hidden = print
+    elements.printOptions.hidden = !print
+    elements.countLabel.textContent = print ? 'scan' : 'count'
+    elements.freezeLabel.textContent = actionLabel()
+    renderRows([])
+    elements.rows.innerHTML = print
+      ? '<div class="placeholder">The print copy appears to the right of the selection.</div>'
+      : '<div class="placeholder">The copy appears to the right of the selection.</div>'
+  }
+
+  function setMode(mode) {
+    if (state.busy || state.mode === mode) return
+    state.mode = mode
+    renderMode()
+    if (state.summary) renderSelection(state.summary)
+    else updateKeys()
+  }
+
+  function shapeCount(colors) {
+    return colors.reduce((sum, color) => sum + color.count, 0)
+  }
+
+  function renderColors() {
+    elements.colors.innerHTML = ''
+    elements.warnings.innerHTML = ''
+    const scanned = state.scanned
+    if (!scanned) {
+      const placeholder = document.createElement('div')
+      placeholder.className = 'placeholder'
+      placeholder.textContent = 'Press scan to list the colors.'
+      elements.colors.appendChild(placeholder)
+      return
+    }
+    for (const color of scanned.colors) {
+      const chosen = color.hex === state.shirt
+      const key = document.createElement('button')
+      key.className = 'key toggle'
+      key.setAttribute('aria-pressed', String(chosen))
+      key.title = chosen ? 'Shirt color, not printed' : 'Choose as shirt color'
+      const led = document.createElement('span')
+      led.className = 'led' + (chosen ? ' on' : '')
+      const swatch = document.createElement('span')
+      swatch.className = 'swatch'
+      swatch.style.background = color.hex
+      const hex = document.createElement('span')
+      hex.textContent = color.hex + (chosen ? '  shirt' : '')
+      const hint = document.createElement('span')
+      hint.className = 'hint'
+      hint.textContent = `${color.count} shape${color.count === 1 ? '' : 's'}`
+      key.append(led, swatch, hex, hint)
+      key.addEventListener('click', () => {
+        if (state.busy) return
+        state.shirt = color.hex
+        renderColors()
+        updateKeys()
+        elements.status.textContent = `Shirt color ${color.hex}, press prepare`
+      })
+      elements.colors.appendChild(key)
+    }
+    const warnings = scanned.nearPairs.map((pair) => `${pair.a} and ${pair.b} look alike (ΔE ${pair.deltaE})`)
+    const unprintable = scanned.unprintable.length
+    if (unprintable > 0) warnings.push(`${unprintable} layer${unprintable === 1 ? '' : 's'} cannot print, listed after prepare`)
+    for (const text of warnings) {
+      const warning = document.createElement('div')
+      warning.className = 'warn'
+      warning.textContent = text
+      elements.warnings.appendChild(warning)
+    }
+  }
+
+  function renderScan(scanned) {
+    state.scanned = scanned
+    state.shirt = null
+    renderColors()
+    const flags = scanned.nearPairs.length + scanned.unprintable.length
+    setLcd(pad(scanned.colors.length, 2), pad(flags, 2), pad(shapeCount(scanned.colors), 4))
+    setSegments(1)
+    elements.status.textContent = scanned.colors.length ? 'Choose the shirt color' : 'No solid colors found'
+    updateKeys()
+  }
+
+  function renderPrintProgress(message) {
+    const { stage, done, total, depth } = message
+    if (stage === 'scan') {
+      elements.status.textContent = `Scanning: ${done} layers`
+      return
+    }
+    const [from, to] = STAGE_SPAN[stage] || [0, 1]
+    setSegments(from + (to - from) * (total ? done / total : 0))
+    if (stage === 'copy' && total) {
+      elements.status.textContent = `Detaching level ${depth}: ${done} of ${total}`
+    } else if (total) {
+      elements.status.textContent = `${STAGE_NAMES[stage]}: ${done} of ${total}`
+    } else {
+      elements.status.textContent = done ? `${STAGE_NAMES[stage]}: ${done} layers` : STAGE_NAMES[stage]
+    }
+  }
+
+  function renderPrintResult(message) {
+    setBusy(false)
+    setSegments(1)
+    const seconds = (message.durationMs / 1000).toFixed(1)
+    setLcd(pad(message.colors.length, 2), pad(message.nearPairs.length + message.skipped.length, 2), pad(message.shapes, 4))
+    const rows = [
+      ['colors found', message.colors.map((color) => color.hex).join(' ')],
+      ['near pairs', pad(message.nearPairs.length, 2)],
+      ['shapes', pad(message.shapes, 4)],
+      ['strokes outlined', pad(message.strokesOutlined, 4)],
+      ['text outlined', pad(message.textOutlined, 2)],
+      ['clips applied', pad(message.clipsApplied, 4)],
+      ['masks applied', pad(message.masksApplied, 2)],
+      ['inks', message.inks.join(' ') || 'none'],
+      ['shirt removed', pad(message.shirtRemoved, 4)],
+      ['skipped', pad(message.skipped.length, 2)],
+      ['time', `${seconds} s`],
+    ]
+    for (const pair of message.nearPairs) rows.push([`${pair.a} and ${pair.b}`, `look alike (ΔE ${pair.deltaE})`, 'skip'])
+    for (const skipped of message.skipped) rows.push([skipped.name, skipped.reason, 'skip'])
+    renderRows(rows)
+    elements.status.textContent = `Prepared: ${message.inks.length} ink${message.inks.length === 1 ? '' : 's'}${message.skipped.length ? ', see report' : ''}`
+  }
+
+  elements.modeFreeze.addEventListener('click', () => setMode('freeze'))
+  elements.modePrint.addEventListener('click', () => setMode('print'))
 
   elements.rename.addEventListener('click', () => {
     state.rename = !state.rename
@@ -407,11 +608,28 @@
   })
 
   elements.countKey.addEventListener('click', () => {
+    if (state.mode === 'print') {
+      // Scanning a large frame takes a while, so it runs busy like a freeze.
+      setBusy(true)
+      setSegments(0)
+      elements.status.textContent = 'Scanning'
+      send({ type: 'scan' })
+      return
+    }
     elements.status.textContent = 'Counting'
     send({ type: 'count' })
   })
 
   elements.freeze.addEventListener('click', () => {
+    if (state.mode === 'print') {
+      const shirt = state.shirt
+      setBusy(true)
+      setSegments(0)
+      elements.status.textContent = 'Copying'
+      renderRows([])
+      send({ type: 'prepare', shirt })
+      return
+    }
     setBusy(true)
     setSegments(0)
     elements.status.textContent = 'Duplicating'
@@ -426,6 +644,18 @@
     if (message.type === 'selection') renderSelection(message.summary)
 
     if (message.type === 'count') renderCount(message)
+
+    if (message.type === 'scan') {
+      setBusy(false)
+      renderScan(message)
+    }
+
+    if (message.type === 'printResult') renderPrintResult(message)
+
+    if (message.type === 'progress' && message.stage) {
+      renderPrintProgress(message)
+      return
+    }
 
     if (message.type === 'progress') {
       setSegments(message.total ? message.done / message.total : 1)
@@ -464,6 +694,7 @@
 
   renderRename()
   renderRemoveHidden()
+  renderMode()
   send({ type: 'ready' })
 </script>
 </body>
